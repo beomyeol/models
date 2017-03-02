@@ -133,13 +133,13 @@ DeployedModel = collections.namedtuple('DeployedModel',
                                        ])
 
 # Default parameters for DeploymentConfig
-_deployment_params = {'num_clones': 1,
-                      'clone_on_cpu': False,
-                      'replica_id': 0,
-                      'num_replicas': 1,
-                      'num_ps_tasks': 0,
-                      'worker_job_name': 'worker',
-                      'ps_job_name': 'ps'}
+# _deployment_params = {'num_clones': 1,
+#                       'clone_on_cpu': False,
+#                       'replica_id': 0,
+#                       'num_replicas': 1,
+#                       'num_ps_tasks': 0,
+#                       'worker_job_name': 'worker',
+#                       'ps_job_name': 'ps'}
 
 
 def create_clones(config, model_fn, args=None, kwargs=None):
@@ -488,7 +488,8 @@ class DeploymentConfig(object):
                num_replicas=1,
                num_ps_tasks=0,
                worker_job_name='worker',
-               ps_job_name='ps'):
+               ps_job_name='ps',
+               cluster=None):
     """Create a DeploymentConfig.
 
     The config describes how to deploy a model across multiple clones and
@@ -518,6 +519,8 @@ class DeploymentConfig(object):
     if num_replicas > 1:
       if num_ps_tasks < 1:
         raise ValueError('When using replicas num_ps_tasks must be positive')
+      if not cluster:
+        raise ValueError('When using replicas cluster must be given')
     if num_replicas > 1 or num_ps_tasks > 0:
       if not worker_job_name:
         raise ValueError('Must specify worker_job_name when using replicas')
@@ -532,6 +535,14 @@ class DeploymentConfig(object):
     self._num_ps_tasks = num_ps_tasks
     self._ps_device = '/job:' + ps_job_name if num_ps_tasks > 0 else ''
     self._worker_device = '/job:' + worker_job_name if num_ps_tasks > 0 else ''
+    self._device_fn = tf.train.replica_device_setter(
+        ps_tasks=num_ps_tasks,
+        ps_device=self._ps_device,
+        worker_device=self._worker_device,
+        merge_devices=True,
+        cluster=cluster,
+        ps_ops=None,
+        ps_strategy=None) if num_ps_tasks > 0 else None
 
   @property
   def num_clones(self):
@@ -575,6 +586,10 @@ class DeploymentConfig(object):
       return None
 
   def clone_device(self, clone_index):
+    if self._device_fn:
+      return self._device_fn
+    # TODO: remove clone feature
+
     """Device used to create the clone and all the ops inside the clone.
 
     Args:
@@ -618,6 +633,9 @@ class DeploymentConfig(object):
     return scope
 
   def optimizer_device(self):
+    if self._device_fn:
+      return self._device_fn
+
     """Device to use with the optimizer.
 
     Returns:
@@ -629,6 +647,9 @@ class DeploymentConfig(object):
       return ''
 
   def inputs_device(self):
+    if self._device_fn:
+      return self._device_fn
+
     """Device to use to build the inputs.
 
     Returns:
@@ -641,6 +662,9 @@ class DeploymentConfig(object):
     return device
 
   def variables_device(self):
+    if self._device_fn:
+      return self._device_fn
+
     """Returns the device to use for variables created inside the clone.
 
     Returns:

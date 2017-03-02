@@ -30,8 +30,18 @@ from preprocessing import preprocessing_factory
 
 slim = tf.contrib.slim
 
-tf.app.flags.DEFINE_string(
-    'master', '', 'The address of the TensorFlow master to use.')
+tf.app.flags.DEFINE_string('type', 'single', 'One of "single" and "distributed"')
+
+# Distributed training options
+tf.app.flags.DEFINE_string('job_name', '', 'One of "ps", "worker"')
+tf.app.flags.DEFINE_string('ps_hosts', '',
+                           """Comma-separated list of hostname:port for the """
+                           """parameter server jobs. e.g. """
+                           """'machine1:2222,machine2:1111,machine2:2222'""")
+tf.app.flags.DEFINE_string('worker_hosts', '',
+                           """Comma-separated list of hostname:port for the """
+                           """worker jobs. e.g. """
+                           """'machine1:2222,machine2:1111,machine2:2222'""")
 
 tf.app.flags.DEFINE_string(
     'train_dir', '/tmp/tfmodel/',
@@ -44,11 +54,6 @@ tf.app.flags.DEFINE_boolean('clone_on_cpu', False,
                             'Use CPUs to deploy clones.')
 
 tf.app.flags.DEFINE_integer('worker_replicas', 1, 'Number of worker replicas.')
-
-tf.app.flags.DEFINE_integer(
-    'num_ps_tasks', 0,
-    'The number of parameter servers. If the value is 0, then the parameters '
-    'are handled locally by the worker.')
 
 tf.app.flags.DEFINE_integer(
     'num_readers', 4,
@@ -392,11 +397,30 @@ def _get_variables_to_train():
     variables_to_train.extend(variables)
   return variables_to_train
 
-def main(_):
-  if not FLAGS.dataset_dir:
-    raise ValueError('You must supply the dataset directory with --dataset_dir')
+def distributed_train():
+  assert FLAGS.job_name in ['ps', 'worker'], 'job_name must be ps or worker'
 
-  tf.logging.set_verbosity(tf.logging.INFO)
+  ps_hosts = FLAGS.ps_hosts.split(',')
+  worker_hosts = FLAGS.worker_hosts.split(',')
+  tf.logging.info('PS hosts are: %s' % ps_hosts)
+  tf.logging.info('Worker hosts are: %s' % worker_hosts)
+
+  cluster_spec = tf.train.ClusterSpec({'ps': ps_hosts,
+                                       'worker': worker_hosts})
+
+  server = tf.train.Server(cluster_spec,
+                           job_name=FLAGS.job_name,
+                           task_index=FLAGS.task)
+
+  if FLAGS.job_name == 'ps':
+    server.join()
+  else:
+    train(server.target, cluster_spec)
+
+def train(master='', cluster_spec=None):
+  if not FLAGS.dataset_dir:
+      raise ValueError('You must supply the dataset directory with --dataset_dir')
+
   with tf.Graph().as_default():
     #######################
     # Config model_deploy #
@@ -406,7 +430,8 @@ def main(_):
         clone_on_cpu=FLAGS.clone_on_cpu,
         replica_id=FLAGS.task,
         num_replicas=FLAGS.worker_replicas,
-        num_ps_tasks=FLAGS.num_ps_tasks)
+        num_ps_tasks=cluster_spec.num_tasks('ps') if cluster_spec else 0,
+        cluster=cluster_spec)
 
     # Create global_step
     with tf.device(deploy_config.variables_device()):
@@ -578,7 +603,7 @@ def main(_):
         train_tensor,
         logdir=FLAGS.train_dir,
         log_every_n_steps=FLAGS.log_every_n_steps,
-        master=FLAGS.master,
+        master=master,
         is_chief=(FLAGS.task == 0),
         init_fn=_get_init_fn(),
         summary_op=summary_op,
@@ -591,6 +616,14 @@ def main(_):
     time_elapsed = time.time() - start_time
     tf.logging.info('Elapsed training time: %.2f sec', time_elapsed)
 
+def main(_):
+  assert FLAGS.type in ['single', 'distributed'], 'type must be either "single" or "distributed"'
+
+  if FLAGS.type == 'single':
+    train()
+  else:
+    distributed_train()
 
 if __name__ == '__main__':
+  tf.logging.set_verbosity(tf.logging.INFO)
   tf.app.run()
