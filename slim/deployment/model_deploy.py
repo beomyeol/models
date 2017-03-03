@@ -535,14 +535,18 @@ class DeploymentConfig(object):
     self._num_ps_tasks = num_ps_tasks
     self._ps_device = '/job:' + ps_job_name if num_ps_tasks > 0 else ''
     self._worker_device = '/job:' + worker_job_name if num_ps_tasks > 0 else ''
-    self._device_fn = tf.train.replica_device_setter(
-        ps_tasks=num_ps_tasks,
-        ps_device=self._ps_device,
-        worker_device=self._worker_device,
-        merge_devices=True,
-        cluster=cluster,
-        ps_ops=None,
-        ps_strategy=None) if num_ps_tasks > 0 else None
+    if num_ps_tasks > 0:
+      worker_device = '%s/task:%d' % (self._worker_device, self._replica_id)
+      self._device_fn = tf.train.replica_device_setter(
+          ps_tasks=num_ps_tasks,
+          ps_device=self._ps_device,
+          worker_device=worker_device,
+          merge_devices=True,
+          cluster=cluster,
+          ps_ops=None,
+          ps_strategy=None)
+    else:
+      self._device_fn = None
 
   @property
   def num_clones(self):
@@ -571,6 +575,13 @@ class DeploymentConfig(object):
   @property
   def worker_device(self):
     return self._worker_device
+
+  def local_worker_device(self):
+    device = ''
+    device += self._worker_device
+    device += '/task:%d' % self._replica_id
+    # device += '/cpu:0'
+    return device
 
   def caching_device(self):
     """Returns the device to use for caching variables.

@@ -26,7 +26,8 @@ from tensorflow.python.training import training_util
 
 def default_train_step_kwargs(global_step,
                               log_every_n_steps,
-                              number_of_steps):
+                              number_of_steps,
+                              vars):
   train_step_kwargs = {}
 
   with ops.name_scope('train_step'):
@@ -40,10 +41,10 @@ def default_train_step_kwargs(global_step,
 
     train_time = tf.placeholder(tf.float32, name='train_time')
     train_step_kwargs['train_time'] = train_time
+    if 'total_train_time' not in vars:
+      raise ValueError('total_train_time variable is needed.')
     train_step_kwargs['total_train_time'] = state_ops.assign_add(
-        tf.Variable(name='total_train_time', initial_value=0.0,
-                    trainable=False, collections=[tf.GraphKeys.LOCAL_VARIABLES]),
-        train_time)
+        vars['total_train_time'], train_time)
 
     # if is_chief and trace_every_n_steps is not None:
     #   train_step_kwargs['should_trace'] = math_ops.equal(
@@ -184,7 +185,8 @@ def train(train_op,
           save_secs=600,
           sync_optimizer=None,
           session_config=None,
-          trace_every_n_steps=None):
+          trace_every_n_steps=None,
+          vars=None):
   """Runs a training loop using a TensorFlow supervisor.
 
   When the sync_optimizer is supplied, gradient updates are applied
@@ -280,29 +282,23 @@ def train(train_op,
     if train_step_kwargs == _USE_DEFAULT:
       train_step_kwargs = default_train_step_kwargs(global_step=global_step,
                                                     log_every_n_steps=log_every_n_steps,
-                                                    number_of_steps=number_of_steps)
+                                                    number_of_steps=number_of_steps,
+                                                    vars=vars)
 
     # checkpoint ops
     saver = saver if saver else tf_saver.Saver()
     save_path = None if not logdir else os.path.join(logdir, checkpoint_basename)
-    save_counter = tf.Variable(
-        name='save_counter', initial_value=0,
-        trainable=False, collections=[tf.GraphKeys.LOCAL_VARIABLES])
-    save_counter_inc_op = state_ops.assign_add(save_counter, 1)
+    save_counter_inc_op = state_ops.assign_add(vars['save_counter'], 1)
     checkpoint_time = tf.placeholder(tf.float32, name='checkpoint_time')
-    total_checkpoint_time = tf.Variable(name='total_checkpoint_time', initial_value=0.0,
-        trainable=False, collections=[tf.GraphKeys.LOCAL_VARIABLES])
-    checkpoint_time_add_op = state_ops.assign_add(total_checkpoint_time, checkpoint_time)
+    checkpoint_time_add_op = state_ops.assign_add(vars['total_checkpoint_time'], checkpoint_time)
 
     if save_steps:
       train_step_kwargs['saver'] = saver
       train_step_kwargs['save_path'] = save_path
       train_step_kwargs['should_save'] = math_ops.equal(
           math_ops.mod(global_step, save_steps), 0)
-      train_step_kwargs['save_counter'] = save_counter
       train_step_kwargs['save_counter_inc_op'] = save_counter_inc_op
       train_step_kwargs['checkpoint_time'] = checkpoint_time
-      train_step_kwargs['total_checkpoint_time'] = total_checkpoint_time
       train_step_kwargs['checkpoint_time_add_op'] = checkpoint_time_add_op
 
     with ops.name_scope('init_ops'):
@@ -409,7 +405,7 @@ def train(train_op,
 
             # logging checkpoint metrics
             np_total_checkpoint_time, np_save_counter = sess.run(
-                [total_checkpoint_time, save_counter])
+                [vars['total_checkpoint_time'], vars['save_counter']])
             tf.logging.info('total checkpoint time: %.2f sec, # of checkpoints: %d',
                 np_total_checkpoint_time, np_save_counter)
         except:

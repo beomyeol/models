@@ -53,8 +53,6 @@ tf.app.flags.DEFINE_integer('num_clones', 1,
 tf.app.flags.DEFINE_boolean('clone_on_cpu', False,
                             'Use CPUs to deploy clones.')
 
-tf.app.flags.DEFINE_integer('worker_replicas', 1, 'Number of worker replicas.')
-
 tf.app.flags.DEFINE_integer(
     'num_readers', 4,
     'The number of parallel readers that read data from the dataset.')
@@ -429,7 +427,7 @@ def train(master='', cluster_spec=None):
         num_clones=FLAGS.num_clones,
         clone_on_cpu=FLAGS.clone_on_cpu,
         replica_id=FLAGS.task,
-        num_replicas=FLAGS.worker_replicas,
+        num_replicas=cluster_spec.num_tasks('worker') if cluster_spec else 1,
         num_ps_tasks=cluster_spec.num_tasks('ps') if cluster_spec else 0,
         cluster=cluster_spec)
 
@@ -594,6 +592,18 @@ def train(master='', cluster_spec=None):
     # Set train step arguments
     number_of_steps = FLAGS.max_number_of_steps
 
+    saver = tf.train.Saver()
+
+    vars = {}
+    # Set devices
+    with tf.device(deploy_config.local_worker_device()):
+      vars['total_train_time'] = tf.Variable(name='total_train_time',
+        initial_value=0.0, trainable=False, collections=[tf.GraphKeys.LOCAL_VARIABLES])
+      vars['save_counter'] = tf.Variable(name='save_counter',
+        initial_value=0, trainable=False, collections=[tf.GraphKeys.LOCAL_VARIABLES])
+      vars['total_checkpoint_time'] = tf.Variable(name='total_checkpoint_time',
+        initial_value=0.0, trainable=False, collections=[tf.GraphKeys.LOCAL_VARIABLES])
+
     ###########################
     # Kicks off the training. #
     ###########################
@@ -609,9 +619,11 @@ def train(master='', cluster_spec=None):
         summary_op=summary_op,
         number_of_steps=number_of_steps,
         save_summaries_secs=FLAGS.save_summaries_secs,
+        saver=saver,
         save_steps=FLAGS.save_steps,
         save_secs=FLAGS.save_interval_secs,
-        sync_optimizer=optimizer if FLAGS.sync_replicas else None)
+        sync_optimizer=optimizer if FLAGS.sync_replicas else None,
+        vars=vars)
 
     time_elapsed = time.time() - start_time
     tf.logging.info('Elapsed training time: %.2f sec', time_elapsed)
