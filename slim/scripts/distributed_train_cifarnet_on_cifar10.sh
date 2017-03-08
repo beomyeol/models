@@ -30,12 +30,6 @@ WORKER_HOSTS=172.17.0.1:2222
 
 USAGE="$0 [JOB NAME: ps or worker] [ID]"
 
-if [ "$1" == "" ]; then
-  echo "ERROR: No job name"
-  echo $USAGE
-  exit
-fi
-
 if [ ! "$1" == "ps" ] && [ ! "$1" == "worker" ]; then
   echo "ERROR: Invalid job name: $1"
   echo $USAGE
