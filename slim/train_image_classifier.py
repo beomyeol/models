@@ -79,6 +79,12 @@ tf.app.flags.DEFINE_integer(
 tf.app.flags.DEFINE_integer(
     'task', 0, 'Task id of the replica running the training.')
 
+tf.app.flags.DEFINE_boolean(
+    'log_placement', False, 'Flag of whether the device placement result is logged')
+
+tf.app.flags.DEFINE_boolean(
+    'ps_on_cpu', False, 'Flag to strictly parameter server operations on CPU devices')
+
 ######################
 # Optimization Flags #
 ######################
@@ -406,8 +412,15 @@ def distributed_train():
   cluster_spec = tf.train.ClusterSpec({'ps': ps_hosts,
                                        'worker': worker_hosts})
 
+  if FLAGS.job_name == 'ps' and FLAGS.ps_on_cpu:
+    tf.logging.info('Disabling GPU...')
+    server_config = tf.ConfigProto(device_count={'GPU': 0})
+  else:
+    server_config = None
+
   server = tf.train.Server(cluster_spec,
                            job_name=FLAGS.job_name,
+                           config=server_config,
                            task_index=FLAGS.task)
 
   if FLAGS.job_name == 'ps':
@@ -594,6 +607,8 @@ def train(master='', cluster_spec=None):
 
     saver = tf.train.Saver()
 
+    session_config = tf.ConfigProto(log_device_placement=FLAGS.log_placement)
+
     vars = {}
     # Set devices
     with tf.device(deploy_config.local_worker_device()):
@@ -623,6 +638,7 @@ def train(master='', cluster_spec=None):
         save_steps=FLAGS.save_steps,
         save_secs=FLAGS.save_interval_secs,
         sync_optimizer=optimizer if FLAGS.sync_replicas else None,
+        session_config=session_config,
         vars=vars)
 
     time_elapsed = time.time() - start_time
