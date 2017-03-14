@@ -76,6 +76,9 @@ tf.app.flags.DEFINE_integer(
 tf.app.flags.DEFINE_integer(
     'save_steps', 0, 'The frequency with which the model is saved, in steps.')
 
+tf.app.flags.DEFINE_boolean(
+    'async_checkpoint', False, 'Perform checkpoint asynchronous without blocking training.')
+
 tf.app.flags.DEFINE_integer(
     'task', 0, 'Task id of the replica running the training.')
 
@@ -635,6 +638,7 @@ def train(master='', cluster_spec=None):
         save_steps=save_steps,
         save_secs=save_secs,
         sync_optimizer=optimizer if FLAGS.sync_replicas else None,
+        async_checkpoint=FLAGS.async_checkpoint,
         session_config=session_config)
 
     time_elapsed = time.time() - start_time

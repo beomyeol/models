@@ -20,6 +20,7 @@ MAX_STEPS=100000
 # Checkpoint
 SAVE_SECS=120
 SAVE_STEPS=0
+ASYNC_CHECKPOINT=False
 
 # Summary
 SAVE_SUMMARIES_SECS=120
@@ -73,7 +74,8 @@ python train_image_classifier.py \
   --learning_rate=0.1 \
   --learning_rate_decay_factor=0.1 \
   --num_epochs_per_decay=200 \
-  --weight_decay=0.004
+  --weight_decay=0.004 \
+  --async_checkpoint=${ASYNC_CHECKPOINT}
 
 # Run evaluation.
 python eval_image_classifier.py \

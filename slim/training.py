@@ -25,17 +25,7 @@ from tensorflow.python.training import sync_replicas_optimizer
 from tensorflow.python.training import training_util
 
 from tensorflow.python.training import basic_session_run_hooks as tf_hooks
-
-def checkpoint(sess, global_step, saver, save_path,
-               save_counter_inc_op, checkpoint_time, checkpoint_time_add_op):
-  start_time = time.time()
-
-  saver.save(sess, save_path, global_step)
-
-  time_elapsed = time.time() - start_time
-
-  sess.run([save_counter_inc_op, checkpoint_time_add_op],
-           feed_dict={checkpoint_time: time_elapsed})
+from tensorflow.python.training import summary_io
 
 _USE_DEFAULT = 0
 
@@ -58,7 +48,7 @@ def train(train_op,
           summary_writer=_USE_DEFAULT,
           startup_delay_steps=0, # not used..
           checkpoint_basename='model.ckpt',
-          asynchronous_checkpoint=False,
+          async_checkpoint=False,
           saver=None,
           save_steps=None,
           save_secs=600,
@@ -225,13 +215,16 @@ def train(train_op,
 
   hooks = [tf.train.StopAtStepHook(last_step=number_of_steps)]
 
+  if summary_writer == _USE_DEFAULT:
+    summary_writer = summary_io.SummaryWriterCache.get(logdir)
+
   # summary
-  sumamry_writer = None if summary_writer == _USE_DEFAULT else sumamry_writer
-  hooks.append(tf.train.SummarySaverHook(save_steps=None,
-                                         save_secs=save_summaries_secs,
-                                         output_dir=logdir,
-                                         summary_writer=summary_writer,
-                                         scaffold=scaffold))
+  if save_summaries_secs and save_summaries_secs > 0:
+    hooks.append(tf.train.SummarySaverHook(save_steps=None,
+                                           save_secs=save_summaries_secs,
+                                           output_dir=logdir,
+                                           summary_writer=summary_writer,
+                                           scaffold=scaffold))
 
   # logging
   if log_every_n_steps and log_every_n_steps > 0:
@@ -239,7 +232,7 @@ def train(train_op,
                                             every_n_iter=log_every_n_steps,
                                             every_n_secs=None))
   # checkpoint
-  if not asynchronous_checkpoint:
+  if not async_checkpoint:
     if (save_secs and save_secs > 0) or (save_steps and save_steps > 0):
       listeners = [TimerCheckpointSaverListener(save_counter_inc_op,
                                                 checkpoint_time_add_op,
@@ -250,6 +243,9 @@ def train(train_op,
                                                 scaffold=scaffold,
                                                 checkpoint_basename=checkpoint_basename,
                                                 listeners=listeners))
+  else:
+    if (not save_secs or save_secs == 0) and (save_steps and save_steps > 0):
+      raise ValueError('Cannot perform step-based asynchronous checkpoint.')
 
   with tf.train.MonitoredTrainingSession(master=master,
                                          is_chief=is_chief,
@@ -261,12 +257,12 @@ def train(train_op,
                                          save_summaries_steps=None, # disable default
                                          config=session_config) as mon_sess:
     logging.info('Starting Session.')
-    # checkpoint_thread = None
-    # if asynchronous_checkpoint and save_secs and save_secs > 0:
-    #   checkpoint_thread = CheckpointThread(sv, sess, saver, save_path, save_secs,
-    #                                        save_counter_inc_op,
-    #                                        checkpoint_time,
-    #                                        checkpoint_time_add_op).start()
+    checkpoint_thread = None
+    if async_checkpoint and save_secs and save_secs > 0:
+      checkpoint_thread = CheckpointThread(mon_sess._coordinated_creator.coord,
+                                           global_step, summary_writer,
+                                           mon_sess._tf_sess(),
+                                           saver, save_path, save_secs).start()
     try:
       while not mon_sess.should_stop():
         start_time = time.time()
@@ -275,16 +271,7 @@ def train(train_op,
         elapsed_time = time.time() - start_time
 
       logging.info('Stopping Training.')
-      if logdir and is_chief:
-        logging.info('Finished training! Saving model to disk.')
-        checkpoint(mon_sess, global_step, saver, save_path,
-                   save_counter_inc_op, checkpoint_time, checkpoint_time_add_op)
 
-        # logging checkpoint metrics
-        np_total_checkpoint_time, np_save_counter = mon_sess.run(
-            [total_checkpoint_time, save_counter])
-        tf.logging.info('total checkpoint time: %.2f sec, # of checkpoints: %d',
-            np_total_checkpoint_time, np_save_counter)
     except:
       logging.info('An exception is thrown.')
       if is_chief and cleanup_op is not None:
@@ -321,27 +308,34 @@ class TimerCheckpointSaverListener(tf_hooks.CheckpointSaverListener):
 
 class CheckpointThread(coordinator.LooperThread):
 
-  def __init__(self, sv, sess, saver, save_path, save_secs,
-               save_counter_inc_op, checkpoint_time, checkpoint_time_add_op):
-    super(CheckpointThread, self).__init__(sv.coord, save_secs)
-    self._sv = sv
+  def __init__(self, coord, global_step, summary_writer,
+               sess, saver, save_path, save_secs):
+    super(CheckpointThread, self).__init__(coord, save_secs)
+    self._global_step = global_step
+    self._summary_writer = summary_writer
     self._saver = saver
     self._sess = sess
     self._save_path = save_path
-    self._save_counter_inc_op = save_counter_inc_op
-    self._checkpoint_time = checkpoint_time
-    self._checkpoint_time_add_op = checkpoint_time_add_op
+    self._save_counter = 0.0
+    self._checkpoint_time = 0.0
     # logging.info('Checkpoint thread is initialized: per %d secs to %s',
     #     save_secs, save_path)
 
   def run_loop(self):
-    checkpoint(self._sess, self._sv.global_step, self._saver, self._save_path,
-               self._save_counter_inc_op, self._checkpoint_time,
-               self._checkpoint_time_add_op)
-    current_step = training_util.global_step(self._sess, self._sv.global_step)
+    start_time = time.time()
+    self._saver.save(self._sess, self._save_path, self._global_step)
+    time_elapsed = time.time() - start_time
+    self._save_counter = self._save_counter + 1;
+    self._checkpoint_time += time_elapsed
+
+    current_step = training_util.global_step(self._sess, self._global_step)
     logging.info('Saving checkpoint. step: %d', current_step)
-    if self._sv.summary_writer and self._sv.global_step is not None:
-      self._sv.summary_writer.add_session_log(
+    if self._summary_writer and self._global_step is not None:
+      self._summary_writer.add_session_log(
           SessionLog(status=SessionLog.CHECKPOINT,
                      checkpoint_path=self._save_path),
           current_step)
+
+  def stop_loop(self):
+    tf.logging.info('total checkpoint time: %.2f sec, # of checkpoints: %d',
+          self._checkpoint_time, self._save_counter)
