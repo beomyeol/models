@@ -432,6 +432,8 @@ def train(master='', cluster_spec=None):
   if not FLAGS.dataset_dir:
       raise ValueError('You must supply the dataset directory with --dataset_dir')
 
+  num_replicas=cluster_spec.num_tasks('worker') if cluster_spec else 1
+
   with tf.Graph().as_default():
     #######################
     # Config model_deploy #
@@ -440,7 +442,7 @@ def train(master='', cluster_spec=None):
         num_clones=FLAGS.num_clones,
         clone_on_cpu=FLAGS.clone_on_cpu,
         replica_id=FLAGS.task,
-        num_replicas=cluster_spec.num_tasks('worker') if cluster_spec else 1,
+        num_replicas=num_replicas,
         num_ps_tasks=cluster_spec.num_tasks('ps') if cluster_spec else 0,
         cluster=cluster_spec)
 
@@ -568,8 +570,7 @@ def train(master='', cluster_spec=None):
           replicas_to_aggregate=FLAGS.replicas_to_aggregate,
           variable_averages=variable_averages,
           variables_to_average=moving_average_variables,
-          replica_id=tf.constant(FLAGS.task, tf.int32, shape=()),
-          total_num_replicas=FLAGS.worker_replicas)
+          total_num_replicas=num_replicas)
     elif FLAGS.moving_average_decay:
       # Update ops executed locally by trainer.
       update_ops.append(variable_averages.apply(moving_average_variables))

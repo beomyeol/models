@@ -331,8 +331,6 @@ def train(train_op,
     if summary_writer == _USE_DEFAULT:
       summary_writer = supervisor.Supervisor.USE_DEFAULT
 
-    cleanup_op = None
-
     if is_chief and sync_optimizer is not None:
       if not isinstance(sync_optimizer,
                         (sync_replicas_optimizer.SyncReplicasOptimizer)):
@@ -342,9 +340,6 @@ def train(train_op,
       # Need to create these BEFORE the supervisor finalizes the graph:
       init_tokens_op = sync_optimizer.get_init_tokens_op()
       chief_queue_runner = sync_optimizer.get_chief_queue_runner()
-      if isinstance(sync_optimizer,
-                    sync_replicas_optimizer.SyncReplicasOptimizer):
-        cleanup_op = sync_optimizer.get_clean_up_op()
 
   sv = supervisor.Supervisor(
       graph=graph,
@@ -409,9 +404,6 @@ def train(train_op,
             tf.logging.info('total checkpoint time: %.2f sec, # of checkpoints: %d',
                 np_total_checkpoint_time, np_save_counter)
         except:
-          if sv.is_chief and cleanup_op is not None:
-            logging.info('About to execute sync_clean_up_op!')
-            sess.run(cleanup_op)
           raise
 
     except errors.AbortedError:
