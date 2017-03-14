@@ -610,15 +610,10 @@ def train(master='', cluster_spec=None):
 
     session_config = tf.ConfigProto(log_device_placement=FLAGS.log_placement)
 
-    vars = {}
-    # Set devices
-    with tf.device(deploy_config.local_worker_device()):
-      vars['total_train_time'] = tf.Variable(name='total_train_time',
-        initial_value=0.0, trainable=False, collections=[tf.GraphKeys.LOCAL_VARIABLES])
-      vars['save_counter'] = tf.Variable(name='save_counter',
-        initial_value=0, trainable=False, collections=[tf.GraphKeys.LOCAL_VARIABLES])
-      vars['total_checkpoint_time'] = tf.Variable(name='total_checkpoint_time',
-        initial_value=0.0, trainable=False, collections=[tf.GraphKeys.LOCAL_VARIABLES])
+    logging_tensors = {'step': global_step, 'loss': total_loss}
+
+    save_steps = FLAGS.save_steps if FLAGS.save_steps > 0 else None
+    save_secs = FLAGS.save_interval_secs if FLAGS.save_interval_secs > 0 else None
 
     ###########################
     # Kicks off the training. #
@@ -628,6 +623,7 @@ def train(master='', cluster_spec=None):
     training.train(
         train_tensor,
         logdir=FLAGS.train_dir,
+        logging_tensors=logging_tensors,
         log_every_n_steps=FLAGS.log_every_n_steps,
         master=master,
         is_chief=(FLAGS.task == 0),
@@ -636,11 +632,10 @@ def train(master='', cluster_spec=None):
         number_of_steps=number_of_steps,
         save_summaries_secs=FLAGS.save_summaries_secs,
         saver=saver,
-        save_steps=FLAGS.save_steps,
-        save_secs=FLAGS.save_interval_secs,
+        save_steps=save_steps,
+        save_secs=save_secs,
         sync_optimizer=optimizer if FLAGS.sync_replicas else None,
-        session_config=session_config,
-        vars=vars)
+        session_config=session_config)
 
     time_elapsed = time.time() - start_time
     tf.logging.info('Elapsed training time: %.2f sec', time_elapsed)

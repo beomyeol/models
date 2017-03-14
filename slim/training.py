@@ -24,128 +24,7 @@ from tensorflow.python.training import supervisor
 from tensorflow.python.training import sync_replicas_optimizer
 from tensorflow.python.training import training_util
 
-def default_train_step_kwargs(global_step,
-                              log_every_n_steps,
-                              number_of_steps,
-                              vars):
-  train_step_kwargs = {}
-
-  with ops.name_scope('train_step'):
-    if number_of_steps:
-      should_stop_op = math_ops.greater_equal(global_step, number_of_steps)
-    else:
-      should_stop_op = constant_op.constant(False)
-    train_step_kwargs['should_stop'] = should_stop_op
-    train_step_kwargs['should_log'] = math_ops.equal(
-        math_ops.mod(global_step, log_every_n_steps), 0)
-
-    train_time = tf.placeholder(tf.float32, name='train_time')
-    train_step_kwargs['train_time'] = train_time
-    if 'total_train_time' not in vars:
-      raise ValueError('total_train_time variable is needed.')
-    train_step_kwargs['total_train_time'] = state_ops.assign_add(
-        vars['total_train_time'], train_time)
-
-    # if is_chief and trace_every_n_steps is not None:
-    #   train_step_kwargs['should_trace'] = math_ops.equal(
-    #       math_ops.mod(global_step, trace_every_n_steps), 0)
-    #   train_step_kwargs['logdir'] = logdir
-
-  return train_step_kwargs
-
-def train_step(sess, train_op, global_step, train_step_kwargs):
-  """Function that takes a gradient step and specifies whether to stop.
-
-  Args:
-    sess: The current session.
-    train_op: An `Operation` that evaluates the gradients and returns the
-      total loss.
-    global_step: A `Tensor` representing the global training step.
-    train_step_kwargs: A dictionary of keyword arguments.
-
-  Returns:
-    The total loss and a boolean indicating whether or not to stop training.
-
-  Raises:
-    Va lueError: if 'should_trace' is in `train_step_kwargs` but `logdir` is not.
-  """
-  start_time = time.time()
-
-  trace_run_options = None
-  run_metadata = None
-  if 'should_trace' in train_step_kwargs:
-    if 'logdir' not in train_step_kwargs:
-      raise ValueError('logdir must be present in train_step_kwargs when '
-                       'should_trace is present')
-    if sess.run(train_step_kwargs['should_trace']):
-      trace_run_options = config_pb2.RunOptions(
-          trace_level=config_pb2.RunOptions.FULL_TRACE)
-      run_metadata = config_pb2.RunMetadata()
-
-  total_loss, np_global_step = sess.run([train_op, global_step],
-                                        options=trace_run_options,
-                                        run_metadata=run_metadata)
-  time_elapsed = time.time() - start_time
-
-  if run_metadata is not None:
-    tl = timeline.Timeline(run_metadata.step_stats)
-    trace = tl.generate_chrome_trace_format()
-    trace_filename = os.path.join(train_step_kwargs['logdir'],
-                                  'tf_trace-%d.json' % np_global_step)
-    logging.info('Writing trace to %s', trace_filename)
-    file_io.write_string_to_file(trace_filename, trace)
-    if 'summary_writer' in train_step_kwargs:
-      train_step_kwargs['summary_writer'].add_run_metadata(run_metadata,
-                                                           'run_metadata-%d' %
-                                                           np_global_step)
-
-  if 'should_log' in train_step_kwargs:
-    if sess.run(train_step_kwargs['should_log']):
-      logging.info('global step %d: loss = %.4f (%.2f sec/step)',
-                   np_global_step, total_loss, time_elapsed)
-
-  # TODO(nsilberman): figure out why we can't put this into sess.run. The
-  # issue right now is that the stop check depends on the global step. The
-  # increment of global step often happens via the train op, which used
-  # created using optimizer.apply_gradients.
-  #
-  # Since running `train_op` causes the global step to be incremented, one
-  # would expected that using a control dependency would allow the
-  # should_stop check to be run in the same session.run call:
-  #
-  #   with ops.control_dependencies([train_op]):
-  #     should_stop_op = ...
-  #
-  # However, this actually seems not to work on certain platforms.
-  if 'should_stop' in train_step_kwargs:
-    should_stop = sess.run(train_step_kwargs['should_stop'])
-  else:
-    should_stop = False
-
-  # Gather total elapsed time
-  total_train_time = sess.run(train_step_kwargs['total_train_time'],
-                              feed_dict={train_step_kwargs['train_time']: time_elapsed})
-
-  # checkpoint periodically
-  if 'should_save' in train_step_kwargs:
-    should_save = sess.run(train_step_kwargs['should_save'])
-    if should_save:
-      logging.info("Saving checkpoint. step: %d", np_global_step)
-      checkpoint(sess, global_step,
-                 saver=train_step_kwargs['saver'],
-                 save_path=train_step_kwargs['save_path'],
-                 save_counter_inc_op=train_step_kwargs['save_counter_inc_op'],
-                 checkpoint_time=train_step_kwargs['checkpoint_time'],
-                 checkpoint_time_add_op=train_step_kwargs['checkpoint_time_add_op'])
-  else:
-    should_save = False
-
-  # log total elapsed time for training
-  if should_stop:
-    logging.info('total training time: %.2f sec, step: %d',
-                 total_train_time, np_global_step)
-
-  return total_loss, should_stop
+from tensorflow.python.training import basic_session_run_hooks as tf_hooks
 
 def checkpoint(sess, global_step, saver, save_path,
                save_counter_inc_op, checkpoint_time, checkpoint_time_add_op):
@@ -162,8 +41,7 @@ _USE_DEFAULT = 0
 
 def train(train_op,
           logdir,
-          train_step_fn=train_step,
-          train_step_kwargs=_USE_DEFAULT,
+          logging_tensors=None,
           log_every_n_steps=1,
           graph=None,
           master='',
@@ -178,15 +56,15 @@ def train(train_op,
           summary_op=_USE_DEFAULT,
           save_summaries_secs=600,
           summary_writer=_USE_DEFAULT,
-          startup_delay_steps=0,
+          startup_delay_steps=0, # not used..
           checkpoint_basename='model.ckpt',
+          asynchronous_checkpoint=False,
           saver=None,
-          save_steps=0,
+          save_steps=None,
           save_secs=600,
           sync_optimizer=None,
           session_config=None,
-          trace_every_n_steps=None,
-          vars=None):
+          trace_every_n_steps=None):
   """Runs a training loop using a TensorFlow supervisor.
 
   When the sync_optimizer is supplied, gradient updates are applied
@@ -271,35 +149,33 @@ def train(train_op,
     raise ValueError(
         '`number_of_steps` must be either None or a positive number.')
 
-  if save_steps and save_secs:
+  if save_steps is not None and save_secs is not None:
     raise ValueError('Either `save_secs` or `save_steps` must be set, not both.')
+
+  if log_every_n_steps and log_every_n_steps > 0:
+    if not logging_tensors:
+      raise ValueError('Cannot provide log_every_n_steps because '
+                       'logging_tensors=None')
 
   graph = graph or ops.get_default_graph()
   with graph.as_default():
     if global_step is None:
       global_step = variables.get_or_create_global_step()
 
-    if train_step_kwargs == _USE_DEFAULT:
-      train_step_kwargs = default_train_step_kwargs(global_step=global_step,
-                                                    log_every_n_steps=log_every_n_steps,
-                                                    number_of_steps=number_of_steps,
-                                                    vars=vars)
-
     # checkpoint ops
     saver = saver if saver else tf_saver.Saver()
     save_path = None if not logdir else os.path.join(logdir, checkpoint_basename)
-    save_counter_inc_op = state_ops.assign_add(vars['save_counter'], 1)
-    checkpoint_time = tf.placeholder(tf.float32, name='checkpoint_time')
-    checkpoint_time_add_op = state_ops.assign_add(vars['total_checkpoint_time'], checkpoint_time)
-
-    if save_steps:
-      train_step_kwargs['saver'] = saver
-      train_step_kwargs['save_path'] = save_path
-      train_step_kwargs['should_save'] = math_ops.equal(
-          math_ops.mod(global_step, save_steps), 0)
-      train_step_kwargs['save_counter_inc_op'] = save_counter_inc_op
-      train_step_kwargs['checkpoint_time'] = checkpoint_time
-      train_step_kwargs['checkpoint_time_add_op'] = checkpoint_time_add_op
+    with ops.name_scope('checkpoint_ops'):
+      save_counter = tf.Variable(
+          name='save_counter', initial_value=0,
+          trainable=False, collections=[tf.GraphKeys.LOCAL_VARIABLES])
+      save_counter_inc_op = state_ops.assign_add(save_counter, 1)
+      checkpoint_time = tf.placeholder(tf.float32, name='checkpoint_time')
+      total_checkpoint_time = tf.Variable(
+          name='total_checkpoint_time', initial_value=0.0,
+          trainable=False, collections=[tf.GraphKeys.LOCAL_VARIABLES])
+      checkpoint_time_add_op = state_ops.assign_add(
+          total_checkpoint_time, checkpoint_time)
 
     with ops.name_scope('init_ops'):
       if init_op == _USE_DEFAULT:
@@ -328,9 +204,6 @@ def train(train_op,
     if summary_op == _USE_DEFAULT:
       summary_op = summary.merge_all()
 
-    if summary_writer == _USE_DEFAULT:
-      summary_writer = supervisor.Supervisor.USE_DEFAULT
-
     if is_chief and sync_optimizer is not None:
       if not isinstance(sync_optimizer,
                         (sync_replicas_optimizer.SyncReplicasOptimizer)):
@@ -341,78 +214,110 @@ def train(train_op,
       init_tokens_op = sync_optimizer.get_init_tokens_op()
       chief_queue_runner = sync_optimizer.get_chief_queue_runner()
 
-  sv = supervisor.Supervisor(
-      graph=graph,
-      is_chief=is_chief,
-      logdir=logdir,
-      init_op=init_op,
-      init_feed_dict=init_feed_dict,
-      local_init_op=local_init_op,
-      ready_for_local_init_op=ready_for_local_init_op,
-      ready_op=ready_op,
-      summary_op=summary_op,
-      summary_writer=summary_writer,
-      global_step=global_step,
-      save_summaries_secs=save_summaries_secs,
-      saver=None, # disable checkpoint service in supervisor
-      save_model_secs=0, # disable checkpoint service in supervisor
-      init_fn=init_fn)
+  scaffold = tf.train.Scaffold(init_op=init_op,
+                               init_feed_dict=init_feed_dict,
+                               init_fn=init_fn,
+                               ready_op=ready_op,
+                               ready_for_local_init_op=ready_for_local_init_op,
+                               local_init_op=local_init_op,
+                               summary_op=summary_op,
+                               saver=saver)
 
-  if summary_writer is not None:
-    train_step_kwargs['summary_writer'] = sv.summary_writer
+  hooks = [tf.train.StopAtStepHook(last_step=number_of_steps)]
 
-  should_retry = True
-  while should_retry:
+  # summary
+  sumamry_writer = None if summary_writer == _USE_DEFAULT else sumamry_writer
+  hooks.append(tf.train.SummarySaverHook(save_steps=None,
+                                         save_secs=save_summaries_secs,
+                                         output_dir=logdir,
+                                         summary_writer=summary_writer,
+                                         scaffold=scaffold))
+
+  # logging
+  if log_every_n_steps and log_every_n_steps > 0:
+    hooks.append(tf.train.LoggingTensorHook(logging_tensors,
+                                            every_n_iter=log_every_n_steps,
+                                            every_n_secs=None))
+  # checkpoint
+  if not asynchronous_checkpoint:
+    if (save_secs and save_secs > 0) or (save_steps and save_steps > 0):
+      listeners = [TimerCheckpointSaverListener(save_counter_inc_op,
+                                                checkpoint_time_add_op,
+                                                checkpoint_time)]
+      hooks.append(tf.train.CheckpointSaverHook(checkpoint_dir=logdir,
+                                                save_secs=save_secs,
+                                                save_steps=save_steps,
+                                                scaffold=scaffold,
+                                                checkpoint_basename=checkpoint_basename,
+                                                listeners=listeners))
+
+  with tf.train.MonitoredTrainingSession(master=master,
+                                         is_chief=is_chief,
+                                         checkpoint_dir=None, # TODO: can be restored??
+                                         scaffold=scaffold,
+                                         hooks=hooks,
+                                         chief_only_hooks=None,
+                                         save_checkpoint_secs=None, # disable default
+                                         save_summaries_steps=None, # disable default
+                                         config=session_config) as mon_sess:
+    logging.info('Starting Session.')
+    # checkpoint_thread = None
+    # if asynchronous_checkpoint and save_secs and save_secs > 0:
+    #   checkpoint_thread = CheckpointThread(sv, sess, saver, save_path, save_secs,
+    #                                        save_counter_inc_op,
+    #                                        checkpoint_time,
+    #                                        checkpoint_time_add_op).start()
     try:
-      should_retry = False
-      with sv.managed_session(
-          master, start_standard_services=False, config=session_config) as sess:
-        logging.info('Starting Session.')
-        if is_chief:
-          if logdir:
-            sv.start_standard_services(sess)
-            # run checkpoint thread
-            if save_secs:
-              CheckpointThread(sv, sess, saver, save_path, save_secs,
-                               save_counter_inc_op,
-                               checkpoint_time,
-                               checkpoint_time_add_op).start()
-        elif startup_delay_steps > 0:
-          _wait_for_step(sess, global_step,
-                         min(startup_delay_steps, number_of_steps or
-                             sys.maxint))
-        sv.start_queue_runners(sess)
-        logging.info('Starting Queues.')
-        if is_chief and sync_optimizer is not None:
-          sv.start_queue_runners(sess, [chief_queue_runner])
-          sess.run(init_tokens_op)
-        try:
-          while not sv.should_stop():
-            total_loss, should_stop = train_step_fn(sess, train_op, global_step,
-                                                    train_step_kwargs)
-            if should_stop:
-              logging.info('Stopping Training.')
-              break
-          if logdir and sv.is_chief:
-            logging.info('Finished training! Saving model to disk.')
-            checkpoint(sess, sv.global_step, saver, save_path,
-                       save_counter_inc_op, checkpoint_time, checkpoint_time_add_op)
+      while not mon_sess.should_stop():
+        start_time = time.time()
+        # mon_sess.run handles AbortedError in case of preempted PS.
+        total_loss, np_global_step = mon_sess.run([train_op, global_step])
+        elapsed_time = time.time() - start_time
 
-            # logging checkpoint metrics
-            np_total_checkpoint_time, np_save_counter = sess.run(
-                [vars['total_checkpoint_time'], vars['save_counter']])
-            tf.logging.info('total checkpoint time: %.2f sec, # of checkpoints: %d',
-                np_total_checkpoint_time, np_save_counter)
-        except:
-          raise
+      logging.info('Stopping Training.')
+      if logdir and is_chief:
+        logging.info('Finished training! Saving model to disk.')
+        checkpoint(mon_sess, global_step, saver, save_path,
+                   save_counter_inc_op, checkpoint_time, checkpoint_time_add_op)
 
-    except errors.AbortedError:
-      # Always re-run on AbortedError as it indicates a restart of one of the
-      # distributed tensorflow servers.
-      logging.info('Retrying training!')
-      should_retry = True
+        # logging checkpoint metrics
+        np_total_checkpoint_time, np_save_counter = mon_sess.run(
+            [total_checkpoint_time, save_counter])
+        tf.logging.info('total checkpoint time: %.2f sec, # of checkpoints: %d',
+            np_total_checkpoint_time, np_save_counter)
+    except:
+      logging.info('An exception is thrown.')
+      if is_chief and cleanup_op is not None:
+        logging.info('About to execute sync_clean_up_op!')
+        mon_sess.run(cleanup_op)
+      raise
 
   return total_loss
+
+class TimerCheckpointSaverListener(tf_hooks.CheckpointSaverListener):
+
+  def __init__(self, save_counter_inc_op, checkpoint_time_add_op, checkpoint_time):
+    self._save_counter_inc_op = save_counter_inc_op
+    self._checkpoint_time_add_op = checkpoint_time_add_op
+    self._checkpoint_time = checkpoint_time
+
+  def begin(self):
+    pass
+
+  def before_save(self, sess, global_step_value):
+    self._start_time = time.time()
+
+  def after_save(self, sess, global_step_value):
+    elapsed_time = time.time() - self._start_time
+    save_counter, _ = sess.run(
+        [self._save_counter_inc_op, self._checkpoint_time_add_op],
+        feed_dict={self._checkpoint_time: elapsed_time})
+    logging.info('%d-th checkpoint. time: %.2f sec',
+        save_counter, elapsed_time)
+
+  def end(self, sess, global_step_value):
+    pass
+
 
 class CheckpointThread(coordinator.LooperThread):
 
@@ -431,7 +336,8 @@ class CheckpointThread(coordinator.LooperThread):
 
   def run_loop(self):
     checkpoint(self._sess, self._sv.global_step, self._saver, self._save_path,
-               self._save_counter_inc_op, self._checkpoint_time, self._checkpoint_time_add_op)
+               self._save_counter_inc_op, self._checkpoint_time,
+               self._checkpoint_time_add_op)
     current_step = training_util.global_step(self._sess, self._sv.global_step)
     logging.info('Saving checkpoint. step: %d', current_step)
     if self._sv.summary_writer and self._sv.global_step is not None:
