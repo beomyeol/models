@@ -48,9 +48,11 @@ if ! [[ ${TASK_ID} =~ $re ]]; then
 fi
 
 # Download the dataset
-python download_and_convert_data.py \
-  --dataset_name=flowers \
-  --dataset_dir=${DATASET_DIR}
+if [ "$1" == "worker" ]; then
+  python download_and_convert_data.py \
+    --dataset_name=flowers \
+    --dataset_dir=${DATASET_DIR}
+fi
 
 OPTS="--type=distributed \
   --job_name=${JOB_NAME} \
@@ -73,7 +75,7 @@ OPTS="--type=distributed \
   --learning_rate=0.01 \
   --ps_on_cpu=${PS_ON_CPU}"
 
-python train_image_classifier.py ${OPT}
+python train_image_classifier.py ${OPTS}
 
 # Run evaluation.
 python eval_image_classifier.py \
