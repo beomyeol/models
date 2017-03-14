@@ -19,6 +19,8 @@ from __future__ import division
 from __future__ import print_function
 
 import tensorflow as tf
+import time
+import training
 
 from tensorflow.python.ops import control_flow_ops
 from datasets import dataset_factory
@@ -65,8 +67,11 @@ tf.app.flags.DEFINE_integer(
     'The frequency with which summaries are saved, in seconds.')
 
 tf.app.flags.DEFINE_integer(
-    'save_interval_secs', 600,
+    'save_interval_secs', 0,
     'The frequency with which the model is saved, in seconds.')
+
+tf.app.flags.DEFINE_integer(
+    'save_steps', 0, 'The frequency with which the model is saved, in steps.')
 
 tf.app.flags.DEFINE_integer(
     'task', 0, 'Task id of the replica running the training.')
@@ -387,7 +392,6 @@ def _get_variables_to_train():
     variables_to_train.extend(variables)
   return variables_to_train
 
-
 def main(_):
   if not FLAGS.dataset_dir:
     raise ValueError('You must supply the dataset directory with --dataset_dir')
@@ -562,22 +566,30 @@ def main(_):
     # Merge all summaries together.
     summary_op = tf.summary.merge(list(summaries), name='summary_op')
 
+    # Set train step arguments
+    number_of_steps = FLAGS.max_number_of_steps
 
     ###########################
     # Kicks off the training. #
     ###########################
-    slim.learning.train(
+    start_time = time.time()
+
+    training.train(
         train_tensor,
         logdir=FLAGS.train_dir,
+        log_every_n_steps=FLAGS.log_every_n_steps,
         master=FLAGS.master,
         is_chief=(FLAGS.task == 0),
         init_fn=_get_init_fn(),
         summary_op=summary_op,
-        number_of_steps=FLAGS.max_number_of_steps,
-        log_every_n_steps=FLAGS.log_every_n_steps,
+        number_of_steps=number_of_steps,
         save_summaries_secs=FLAGS.save_summaries_secs,
-        save_interval_secs=FLAGS.save_interval_secs,
+        save_steps=FLAGS.save_steps,
+        save_secs=FLAGS.save_interval_secs,
         sync_optimizer=optimizer if FLAGS.sync_replicas else None)
+
+    time_elapsed = time.time() - start_time
+    tf.logging.info('Elapsed training time: %.2f sec', time_elapsed)
 
 
 if __name__ == '__main__':

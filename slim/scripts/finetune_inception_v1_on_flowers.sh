@@ -18,6 +18,13 @@ TRAIN_DIR=/tmp/flowers-models/inception_v1
 # Where the dataset is saved to.
 DATASET_DIR=/tmp/flowers
 
+# Checkpoint
+SAVE_SECS=60
+SAVE_STEPS=0
+
+# Summary
+SAVE_SUMMARIES_SECS=120
+
 # Download the pre-trained checkpoint.
 if [ ! -d "$PRETRAINED_CHECKPOINT_DIR" ]; then
   mkdir ${PRETRAINED_CHECKPOINT_DIR}
@@ -47,8 +54,9 @@ python train_image_classifier.py \
   --max_number_of_steps=3000 \
   --batch_size=32 \
   --learning_rate=0.01 \
-  --save_interval_secs=60 \
-  --save_summaries_secs=60 \
+  --save_interval_secs=${SAVE_SECS} \
+  --save_steps=${SAVE_STEPS} \
+  --save_summaries_secs=${SAVE_SUMMARIES_SECS} \
   --log_every_n_steps=100 \
   --optimizer=rmsprop \
   --weight_decay=0.00004
