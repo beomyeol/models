@@ -610,16 +610,6 @@ def train(master='', cluster_spec=None):
 
     session_config = tf.ConfigProto(log_device_placement=FLAGS.log_placement)
 
-    vars = {}
-    # Set devices
-    with tf.device(deploy_config.local_worker_device()):
-      vars['total_train_time'] = tf.Variable(name='total_train_time',
-        initial_value=0.0, trainable=False, collections=[tf.GraphKeys.LOCAL_VARIABLES])
-      vars['save_counter'] = tf.Variable(name='save_counter',
-        initial_value=0, trainable=False, collections=[tf.GraphKeys.LOCAL_VARIABLES])
-      vars['total_checkpoint_time'] = tf.Variable(name='total_checkpoint_time',
-        initial_value=0.0, trainable=False, collections=[tf.GraphKeys.LOCAL_VARIABLES])
-
     ###########################
     # Kicks off the training. #
     ###########################
@@ -639,8 +629,7 @@ def train(master='', cluster_spec=None):
         save_steps=FLAGS.save_steps,
         save_secs=FLAGS.save_interval_secs,
         sync_optimizer=optimizer if FLAGS.sync_replicas else None,
-        session_config=session_config,
-        vars=vars)
+        session_config=session_config)
 
     time_elapsed = time.time() - start_time
     tf.logging.info('Elapsed training time: %.2f sec', time_elapsed)

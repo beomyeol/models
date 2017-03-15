@@ -30,15 +30,17 @@ metrics = {
   'checkpoint_count': 0.0
 }
 
-def add_metrics(key, value):
+def add_metric(key, value):
   if not key in metrics:
     raise ValueError('Unknown key: ' + key)
   metrics[key] = metrics[key] + value
 
+def get_metric(key):
+  return metrics[key]
+
 def default_train_step_kwargs(global_step,
                               log_every_n_steps,
-                              number_of_steps,
-                              vars):
+                              number_of_steps):
   train_step_kwargs = {}
 
   with ops.name_scope('train_step'):
@@ -49,13 +51,6 @@ def default_train_step_kwargs(global_step,
     train_step_kwargs['should_stop'] = should_stop_op
     train_step_kwargs['should_log'] = math_ops.equal(
         math_ops.mod(global_step, log_every_n_steps), 0)
-
-    # train_time = tf.placeholder(tf.float32, name='train_time')
-    # train_step_kwargs['train_time'] = train_time
-    # if 'total_train_time' not in vars:
-    #   raise ValueError('total_train_time variable is needed.')
-    # train_step_kwargs['total_train_time'] = state_ops.assign_add(
-    #     vars['total_train_time'], train_time)
 
     # if is_chief and trace_every_n_steps is not None:
     #   train_step_kwargs['should_trace'] = math_ops.equal(
@@ -134,9 +129,7 @@ def train_step(sess, train_op, global_step, train_step_kwargs):
     should_stop = False
 
   # Gather total elapsed time
-  metrics['total_train_time'] = metrics['total_train_time'] + time_elapsed
-  # total_train_time = sess.run(train_step_kwargs['total_train_time'],
-  #                             feed_dict={train_step_kwargs['train_time']: time_elapsed})
+  add_metric('total_train_time', time_elapsed)
 
   # checkpoint periodically
   if 'should_save' in train_step_kwargs:
@@ -146,32 +139,25 @@ def train_step(sess, train_op, global_step, train_step_kwargs):
       checkpoint(sess, global_step,
                  saver=train_step_kwargs['saver'],
                  save_path=train_step_kwargs['save_path'])
-                 # save_counter_inc_op=train_step_kwargs['save_counter_inc_op'],
-                 # checkpoint_time=train_step_kwargs['checkpoint_time'],
-                 # checkpoint_time_add_op=train_step_kwargs['checkpoint_time_add_op'])
   else:
     should_save = False
 
   # log total elapsed time for training
   if should_stop:
     logging.info('total training time: %.2f sec, step: %d',
-                 metrics['total_train_time'], np_global_step)
+                 get_metric('total_train_time'), np_global_step)
 
   return total_loss, should_stop
 
 def checkpoint(sess, global_step, saver, save_path):
-               # save_counter_inc_op, checkpoint_time, checkpoint_time_add_op):
   start_time = time.time()
 
   saver.save(sess, save_path, global_step)
 
   time_elapsed = time.time() - start_time
 
-  add_metrics('checkpoint_count', 1)
-  add_metrics('total_checkpoint_time', time_elapsed)
-
-  # sess.run([save_counter_inc_op, checkpoint_time_add_op],
-  #          feed_dict={checkpoint_time: time_elapsed})
+  add_metric('checkpoint_count', 1)
+  add_metric('total_checkpoint_time', time_elapsed)
 
 _USE_DEFAULT = 0
 
@@ -200,8 +186,7 @@ def train(train_op,
           save_secs=600,
           sync_optimizer=None,
           session_config=None,
-          trace_every_n_steps=None,
-          vars=None):
+          trace_every_n_steps=None):
   """Runs a training loop using a TensorFlow supervisor.
 
   When the sync_optimizer is supplied, gradient updates are applied
@@ -297,24 +282,17 @@ def train(train_op,
     if train_step_kwargs == _USE_DEFAULT:
       train_step_kwargs = default_train_step_kwargs(global_step=global_step,
                                                     log_every_n_steps=log_every_n_steps,
-                                                    number_of_steps=number_of_steps,
-                                                    vars=vars)
+                                                    number_of_steps=number_of_steps)
 
     # checkpoint ops
     saver = saver if saver else tf_saver.Saver()
     save_path = None if not logdir else os.path.join(logdir, checkpoint_basename)
-    # save_counter_inc_op = state_ops.assign_add(vars['save_counter'], 1)
-    # checkpoint_time = tf.placeholder(tf.float32, name='checkpoint_time')
-    # checkpoint_time_add_op = state_ops.assign_add(vars['total_checkpoint_time'], checkpoint_time)
 
     if save_steps:
       train_step_kwargs['saver'] = saver
       train_step_kwargs['save_path'] = save_path
       train_step_kwargs['should_save'] = math_ops.equal(
           math_ops.mod(global_step, save_steps), 0)
-      # train_step_kwargs['save_counter_inc_op'] = save_counter_inc_op
-      # train_step_kwargs['checkpoint_time'] = checkpoint_time
-      # train_step_kwargs['checkpoint_time_add_op'] = checkpoint_time_add_op
 
     with ops.name_scope('init_ops'):
       if init_op == _USE_DEFAULT:
@@ -411,7 +389,7 @@ def train(train_op,
 
             # logging checkpoint metrics
             tf.logging.info('total checkpoint time: %.2f sec, # of checkpoints: %d',
-                metrics['total_checkpoint_time'], metrics['checkpoint_count'])
+                get_metric('total_checkpoint_time'), get_metric('checkpoint_count'))
         except:
           raise
 
@@ -431,15 +409,11 @@ class CheckpointThread(coordinator.LooperThread):
     self._saver = saver
     self._sess = sess
     self._save_path = save_path
-    # self._save_counter_inc_op = save_counter_inc_op
-    # self._checkpoint_time = checkpoint_time
-    # self._checkpoint_time_add_op = checkpoint_time_add_op
     # logging.info('Checkpoint thread is initialized: per %d secs to %s',
     #     save_secs, save_path)
 
   def run_loop(self):
     checkpoint(self._sess, self._sv.global_step, self._saver, self._save_path)
-               # self._save_counter_inc_op, self._checkpoint_time, self._checkpoint_time_add_op)
     current_step = training_util.global_step(self._sess, self._sv.global_step)
     logging.info('Saving checkpoint. step: %d', current_step)
     if self._sv.summary_writer and self._sv.global_step is not None:
