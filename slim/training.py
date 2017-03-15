@@ -363,7 +363,6 @@ def train(train_op,
       with sv.managed_session(
           master, start_standard_services=False, config=session_config) as sess:
         logging.info('Starting Session.')
-        logging.info('Time elapsed for initialization: %.2f sec', time.time() - start_time)
         if is_chief:
           if logdir:
             sv.start_standard_services(sess)
@@ -380,6 +379,7 @@ def train(train_op,
           sv.start_queue_runners(sess, [chief_queue_runner])
           sess.run(init_tokens_op)
         try:
+          logging.info('Time elapsed for initialization: %.2f sec', time.time() - start_time)
           while not sv.should_stop():
             total_loss, should_stop = train_step_fn(sess, train_op, global_step,
                                                     train_step_kwargs)
