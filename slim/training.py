@@ -253,6 +253,8 @@ def train(train_op,
       negative, or if `trace_every_n_steps` is not `None` and no `logdir` is
       provided.
   """
+  start_time = time.time()
+
   if train_op is None:
     raise ValueError('train_op cannot be None.')
 
@@ -361,6 +363,7 @@ def train(train_op,
       with sv.managed_session(
           master, start_standard_services=False, config=session_config) as sess:
         logging.info('Starting Session.')
+        logging.info('Time elapsed for initialization: %.2f sec', time.time() - start_time)
         if is_chief:
           if logdir:
             sv.start_standard_services(sess)
@@ -398,6 +401,9 @@ def train(train_op,
       # distributed tensorflow servers.
       logging.info('Retrying training!')
       should_retry = True
+
+  time_elapsed = time.time() - start_time
+  logging.info('Elapsed training time: %.2f sec', time_elapsed)
 
   return total_loss
 

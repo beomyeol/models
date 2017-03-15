@@ -19,7 +19,6 @@ from __future__ import division
 from __future__ import print_function
 
 import tensorflow as tf
-import time
 import training
 
 from tensorflow.python.ops import control_flow_ops
@@ -613,8 +612,6 @@ def train(master='', cluster_spec=None):
     ###########################
     # Kicks off the training. #
     ###########################
-    start_time = time.time()
-
     training.train(
         train_tensor,
         logdir=FLAGS.train_dir,
@@ -630,9 +627,6 @@ def train(master='', cluster_spec=None):
         save_secs=FLAGS.save_interval_secs,
         sync_optimizer=optimizer if FLAGS.sync_replicas else None,
         session_config=session_config)
-
-    time_elapsed = time.time() - start_time
-    tf.logging.info('Elapsed training time: %.2f sec', time_elapsed)
 
 def main(_):
   assert FLAGS.type in ['single', 'distributed'], 'type must be either "single" or "distributed"'
