@@ -23,9 +23,22 @@ from tensorflow.python.training import saver as tf_saver
 from tensorflow.python.training import supervisor
 from tensorflow.python.training import sync_replicas_optimizer
 from tensorflow.python.training import training_util
-
 from tensorflow.python.training import basic_session_run_hooks as tf_hooks
 from tensorflow.python.training import summary_io
+
+metrics = {
+  # 'total_train_time': 0.0,
+  'total_checkpoint_time': 0.0,
+  'checkpoint_count': 0.0
+}
+
+def add_metrics(key, value):
+  if not key in metrics:
+    raise ValueError('Unknown key: ' + key)
+  metrics[key] += value
+
+def get_metrics(key):
+  return metrics[key]
 
 _USE_DEFAULT = 0
 
@@ -155,17 +168,6 @@ def train(train_op,
     # checkpoint ops
     saver = saver if saver else tf_saver.Saver()
     save_path = None if not logdir else os.path.join(logdir, checkpoint_basename)
-    with ops.name_scope('checkpoint_ops'):
-      save_counter = tf.Variable(
-          name='save_counter', initial_value=0,
-          trainable=False, collections=[tf.GraphKeys.LOCAL_VARIABLES])
-      save_counter_inc_op = state_ops.assign_add(save_counter, 1)
-      checkpoint_time = tf.placeholder(tf.float32, name='checkpoint_time')
-      total_checkpoint_time = tf.Variable(
-          name='total_checkpoint_time', initial_value=0.0,
-          trainable=False, collections=[tf.GraphKeys.LOCAL_VARIABLES])
-      checkpoint_time_add_op = state_ops.assign_add(
-          total_checkpoint_time, checkpoint_time)
 
     with ops.name_scope('init_ops'):
       if init_op == _USE_DEFAULT:
@@ -234,9 +236,7 @@ def train(train_op,
   # checkpoint
   if not async_checkpoint:
     if (save_secs and save_secs > 0) or (save_steps and save_steps > 0):
-      listeners = [TimerCheckpointSaverListener(save_counter_inc_op,
-                                                checkpoint_time_add_op,
-                                                checkpoint_time)]
+      listeners = [TimerCheckpointSaverListener()]
       hooks.append(tf.train.CheckpointSaverHook(checkpoint_dir=logdir,
                                                 save_secs=save_secs,
                                                 save_steps=save_steps,
@@ -283,10 +283,8 @@ def train(train_op,
 
 class TimerCheckpointSaverListener(tf_hooks.CheckpointSaverListener):
 
-  def __init__(self, save_counter_inc_op, checkpoint_time_add_op, checkpoint_time):
-    self._save_counter_inc_op = save_counter_inc_op
-    self._checkpoint_time_add_op = checkpoint_time_add_op
-    self._checkpoint_time = checkpoint_time
+  def __init__(self):
+    pass
 
   def begin(self):
     pass
@@ -296,13 +294,14 @@ class TimerCheckpointSaverListener(tf_hooks.CheckpointSaverListener):
 
   def after_save(self, sess, global_step_value):
     elapsed_time = time.time() - self._start_time
-    save_counter, _ = sess.run(
-        [self._save_counter_inc_op, self._checkpoint_time_add_op],
-        feed_dict={self._checkpoint_time: elapsed_time})
+    add_metrics('total_checkpoint_time', elapsed_time)
+    add_metrics('checkpoint_count', 1)
     logging.info('%d-th checkpoint. time: %.2f sec',
-        save_counter, elapsed_time)
+        get_metrics('checkpoint_count'), elapsed_time)
 
   def end(self, sess, global_step_value):
+    tf.logging.info('total checkpoint time: %.2f sec, # of checkpoints: %d',
+          get_metrics('total_checkpoint_time'), get_metrics('checkpoint_count'))
     pass
 
 
@@ -316,8 +315,6 @@ class CheckpointThread(coordinator.LooperThread):
     self._saver = saver
     self._sess = sess
     self._save_path = save_path
-    self._save_counter = 0.0
-    self._checkpoint_time = 0.0
     # logging.info('Checkpoint thread is initialized: per %d secs to %s',
     #     save_secs, save_path)
 
@@ -325,8 +322,8 @@ class CheckpointThread(coordinator.LooperThread):
     start_time = time.time()
     self._saver.save(self._sess, self._save_path, self._global_step)
     time_elapsed = time.time() - start_time
-    self._save_counter = self._save_counter + 1;
-    self._checkpoint_time += time_elapsed
+    add_metrics('checkpoint_count', 1)
+    add_metrics('total_checkpoint_time', time_elapsed)
 
     current_step = training_util.global_step(self._sess, self._global_step)
     logging.info('Saving checkpoint. step: %d', current_step)
@@ -338,4 +335,4 @@ class CheckpointThread(coordinator.LooperThread):
 
   def stop_loop(self):
     tf.logging.info('total checkpoint time: %.2f sec, # of checkpoints: %d',
-          self._checkpoint_time, self._save_counter)
+          get_metrics('total_checkpoint_time'), get_metrics('checkpoint_count'))
