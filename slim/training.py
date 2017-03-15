@@ -25,6 +25,7 @@ from tensorflow.python.training import sync_replicas_optimizer
 from tensorflow.python.training import training_util
 
 metrics = {
+  'step_count': 0,
   'total_train_time': 0.0,
   'total_checkpoint_time': 0.0,
   'checkpoint_count': 0.0
@@ -383,6 +384,7 @@ def train(train_op,
           while not sv.should_stop():
             total_loss, should_stop = train_step_fn(sess, train_op, global_step,
                                                     train_step_kwargs)
+            add_metric('step_count', 1)
             if should_stop:
               logging.info('Stopping Training.')
               break
@@ -391,8 +393,9 @@ def train(train_op,
             checkpoint(sess, sv.global_step, saver, save_path)
 
             # logging checkpoint metrics
-            tf.logging.info('total checkpoint time: %.2f sec, # of checkpoints: %d',
+            logging.info('total checkpoint time: %.2f sec, # of checkpoints: %d',
                 get_metric('total_checkpoint_time'), get_metric('checkpoint_count'))
+
         except:
           raise
 
@@ -403,7 +406,8 @@ def train(train_op,
       should_retry = True
 
   time_elapsed = time.time() - start_time
-  logging.info('Elapsed training time: %.2f sec', time_elapsed)
+  logging.info('Elapsed training time: %.2f sec, # of steps processed: %d',
+      time_elapsed, get_metric('step_count'))
 
   return total_loss
 
