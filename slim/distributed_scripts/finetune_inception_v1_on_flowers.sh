@@ -10,13 +10,13 @@
 # ./slim/scripts/finetune_inception_v1_on_flowers.sh
 
 # Where the pre-trained InceptionV1 checkpoint is saved to.
-PRETRAINED_CHECKPOINT_DIR=/tmp/checkpoints
+PRETRAINED_CHECKPOINT_DIR=/checkpoints
 
 # Where the training (fine-tuned) checkpoint and logs will be saved to.
-TRAIN_DIR=/tmp/flowers-models/inception_v1
+TRAIN_DIR=/train_logs/flowers-models/inception_v1
 
 # Where the dataset is saved to.
-DATASET_DIR=/tmp/flowers
+DATASET_DIR=/datasets/flowers
 
 ONLY_NEW_MAX_STEPS=2000
 ENTIRE_MAX_STEPS=1000

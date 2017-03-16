@@ -1,0 +1,27 @@
+#!/bin/bash
+
+MACHINE_1=172.31.61.54
+MACHINE_2=172.31.53.62
+MACHINE_3=172.31.58.253
+MACHINE_4=172.31.48.201
+
+MAX_STEPS=3000
+
+# 1 PS and 3 Workers on distinct machines
+PS_HOSTS=${MACHINE_1}:2222
+WORKER_HOSTS=${MACHINE_2}:2223,${MACHINE_3}:2223,${MACHINE_4}:2223
+PS_ON_CPU=False
+
+# Colocation of 4 PSs and 4 Workers on each machine
+#PS_HOSTS=${MACHINE_1}:2222,${MACHINE_2}:2222,${MACHINE_3}:2222,${MACHINE_4}:2222
+#WORKER_HOSTS=${MACHINE_1}:2223,${MACHINE_2}:2223,${MACHINE_3}:2223,${MACHINE_4}:2223
+#PS_ON_CPU=True
+
+# Colocation of 2 PSs and 4 Workers
+#PS_HOSTS=${MACHINE_1}:2222,${MACHINE_2}:2222
+#WORKER_HOSTS=${MACHINE_1}:2223,${MACHINE_2}:2223,${MACHINE_3}:2223,${MACHINE_4}:2223
+#PS_ON_CPU=True
+
+# Paths for inception_v1
+TRAIN_DIR=/train_logs/flowers-models/inception_v1
+DATASET_DIR=/datasets/flowers

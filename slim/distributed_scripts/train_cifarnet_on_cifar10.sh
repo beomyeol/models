@@ -7,7 +7,7 @@
 #
 # Usage:
 # cd slim
-# ./scripts/train_cifar_net_on_mnist.sh
+# ./distributed_scripts/train_cifar_net_on_mnist.sh
 
 # Where the checkpoint and logs will be saved to.
 TRAIN_DIR=/tmp/cifarnet-model
@@ -24,39 +24,47 @@ SAVE_STEPS=0
 # Summary
 SAVE_SUMMARIES_SECS=120
 
-# Hosts
-PS_HOSTS=172.17.0.2:2222
-WORKER_HOSTS=172.17.0.1:2222
-
+# Options for distributed training
 USAGE="$0 [JOB NAME: ps or worker] [ID]"
 
-if [ ! "$1" == "ps" ] && [ ! "$1" == "worker" ]; then
-  echo "ERROR: Invalid job name: $1"
+JOB_NAME=$1
+TASK_ID=$2
+
+PS_HOSTS=localhost:2222
+WORKER_HOSTS=localhost:2223
+PS_ON_CPU=False
+
+# Overwrite default values
+ENV_PATH=./distributed_scripts/env.sh
+if [ -e "${ENV_PATH}" ]; then
+  source ${ENV_PATH}
+fi
+
+if [ ! "${JOB_NAME}" == "ps" ] && [ ! "${JOB_NAME}" == "worker" ]; then
+  echo "ERROR: Invalid job name: ${JOB_NAME}"
   echo $USAGE
   exit
 fi
 
 re='^[0-9]+$'
-if ! [[ $2 =~ $re ]]; then
-  echo "ERROR: Invalid id: $2"
+if ! [[ ${TASK_ID} =~ $re ]]; then
+  echo "ERROR: Invalid id: ${TASK_ID}"
   echo $USAGE
   exit
 fi
 
 # Download the dataset
-if [ "$1" == "worker" ]; then
+if [ "${JOB_NAME}" == "worker" ]; then
   python download_and_convert_data.py \
     --dataset_name=cifar10 \
     --dataset_dir=${DATASET_DIR}
 fi
 
-# Run training.
-python train_image_classifier.py \
-  --type=distributed \
-  --job_name=$1 \
+OPTS="--type=distributed \
+  --job_name=${JOB_NAME} \
   --ps_hosts=${PS_HOSTS} \
   --worker_hosts=${WORKER_HOSTS} \
-  --task=$2 \
+  --task=${TASK_ID} \
   --train_dir=${TRAIN_DIR} \
   --dataset_name=cifar10 \
   --dataset_split_name=train \
@@ -73,13 +81,19 @@ python train_image_classifier.py \
   --learning_rate=0.1 \
   --learning_rate_decay_factor=0.1 \
   --num_epochs_per_decay=200 \
-  --weight_decay=0.004
+  --weight_decay=0.004 \
+  --ps_on_cpu=${PS_ON_CPU}"
+
+# Run training.
+python train_image_classifier.py ${OPTS}
 
 # Run evaluation.
-python eval_image_classifier.py \
-  --checkpoint_path=${TRAIN_DIR} \
-  --eval_dir=${TRAIN_DIR} \
-  --dataset_name=cifar10 \
-  --dataset_split_name=test \
-  --dataset_dir=${DATASET_DIR} \
-  --model_name=cifarnet
+if [ "${JOB_NAME}" == "worker" ]; then
+  python eval_image_classifier.py \
+    --checkpoint_path=${TRAIN_DIR} \
+    --eval_dir=${TRAIN_DIR} \
+    --dataset_name=cifar10 \
+    --dataset_split_name=test \
+    --dataset_dir=${DATASET_DIR} \
+    --model_name=cifarnet
+fi

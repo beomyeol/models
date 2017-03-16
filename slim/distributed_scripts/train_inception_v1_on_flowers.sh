@@ -7,7 +7,7 @@
 #
 # Usage:
 # cd slim
-# ./slim/scripts/finetune_inception_v1_on_flowers.sh
+# ./distributed_scripts/train_inception_v1_on_flowers.sh
 
 # Where the training (fine-tuned) checkpoint and logs will be saved to.
 TRAIN_DIR=/tmp/flowers-models/inception_v1
@@ -15,24 +15,30 @@ TRAIN_DIR=/tmp/flowers-models/inception_v1
 # Where the dataset is saved to.
 DATASET_DIR=/tmp/flowers
 
-MAX_STEPS=1000
-
-PS_HOSTS=172.17.0.2:2222
-WORKER_HOSTS=172.17.0.1:2222
-
-PS_ON_CPU=False
+MAX_STEPS=3000
 
 # Checkpoint
-SAVE_SECS=60
+SAVE_SECS=0
 SAVE_STEPS=0
 
 # Summary
-SAVE_SUMMARIES_SECS=120
+SAVE_SUMMARIES_SECS=0
 
+# Options for distributed training
 USAGE="$0 [JOB NAME: ps or worker] [ID]"
 
 JOB_NAME=$1
 TASK_ID=$2
+
+PS_HOSTS=localhost:2222
+WORKER_HOSTS=localhost:2223
+PS_ON_CPU=False
+
+# Overwrite default values
+ENV_PATH=./distributed_scripts/env.sh
+if [ -e "${ENV_PATH}" ]; then
+  source ${ENV_PATH}
+fi
 
 if [ ! "${JOB_NAME}" == "ps" ] && [ ! "${JOB_NAME}" == "worker" ]; then
   echo "ERROR: Invalid job name: ${JOB_NAME}"
@@ -48,7 +54,7 @@ if ! [[ ${TASK_ID} =~ $re ]]; then
 fi
 
 # Download the dataset
-if [ "$1" == "worker" ]; then
+if [ "${JOB_NAME}" == "worker" ]; then
   python download_and_convert_data.py \
     --dataset_name=flowers \
     --dataset_dir=${DATASET_DIR}
@@ -78,10 +84,12 @@ OPTS="--type=distributed \
 python train_image_classifier.py ${OPTS}
 
 # Run evaluation.
-python eval_image_classifier.py \
-  --checkpoint_path=${TRAIN_DIR} \
-  --eval_dir=${TRAIN_DIR} \
-  --dataset_name=flowers \
-  --dataset_split_name=validation \
-  --dataset_dir=${DATASET_DIR} \
-  --model_name=inception_v1
+if [ "${JOB_NAME}" == "worker" ]; then
+  python eval_image_classifier.py \
+    --checkpoint_path=${TRAIN_DIR} \
+    --eval_dir=${TRAIN_DIR} \
+    --dataset_name=flowers \
+    --dataset_split_name=validation \
+    --dataset_dir=${DATASET_DIR} \
+    --model_name=inception_v1
+fi
