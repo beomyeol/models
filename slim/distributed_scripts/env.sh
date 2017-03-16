@@ -25,3 +25,4 @@ PS_ON_CPU=False
 # Paths for inception_v1
 TRAIN_DIR=/train_logs/flowers-models/inception_v1
 DATASET_DIR=/datasets/flowers
+PRETRAINED_CHECKPOINT_DIR=/checkpoints

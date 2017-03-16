@@ -32,7 +32,7 @@ TASK_ID=$2
 
 PS_HOSTS=localhost:2222
 WORKER_HOSTS=localhost:2223
-PS_ON_CPU=False
+PS_ON_CPU=True
 
 # Overwrite default values
 ENV_PATH=./distributed_scripts/env.sh
