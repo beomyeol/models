@@ -9,11 +9,18 @@
 # cd slim
 # ./distributed_scripts/train_cifar_net_on_mnist.sh
 
-# Where the checkpoint and logs will be saved to.
-TRAIN_DIR=/tmp/cifarnet-model
-
-# Where the dataset is saved to.
-DATASET_DIR=/tmp/cifar10
+HDFS_ENABLED=False
+if [ "${HDFS_ENABLED}" == "True" ]; then
+  # Where the checkpoint and logs will be saved to.
+  TRAIN_DIR=hdfs://namenode:9000/cifarnet-model
+  # Where the dataset is saved to.
+  DATASET_DIR=hdfs://namenode:9000/datasets/cifar10
+else
+  # Where the checkpoint and logs will be saved to.
+  TRAIN_DIR=/tmp/cifarnet-model
+  # Where the dataset is saved to.
+  DATASET_DIR=/tmp/cifar10
+fi
 
 MAX_STEPS=100000
 
@@ -40,6 +47,11 @@ if [ -e "${ENV_PATH}" ]; then
   source ${ENV_PATH}
 fi
 
+# Re-check the hdfs flag
+if [ "${HDFS_ENABLED}" == "True" ]; then
+  source ./distributed_scripts/hadoop_env.sh
+fi
+
 if [ ! "${JOB_NAME}" == "ps" ] && [ ! "${JOB_NAME}" == "worker" ]; then
   echo "ERROR: Invalid job name: ${JOB_NAME}"
   echo $USAGE
@@ -63,10 +75,12 @@ OPTS="--type=distributed \
 if [ "${JOB_NAME}" == "ps" ]; then # PS
   OPTS+=" --ps_on_cpu=${PS_ON_CPU}"
 else # Worker
-  # Download the dataset
-  python download_and_convert_data.py \
-    --dataset_name=cifar10 \
-    --dataset_dir=${DATASET_DIR}
+  if [ ! "${HDFS_ENABLED}" == "True" ]; then
+    # Download the dataset
+    python download_and_convert_data.py \
+      --dataset_name=cifar10 \
+      --dataset_dir=${DATASET_DIR}
+  fi
 
   OPTS+=" --dataset_name=cifar10 \
     --dataset_split_name=train \
@@ -87,4 +101,8 @@ else # Worker
 fi
 
 # Run training.
-python train_image_classifier.py ${OPTS}
+if [ "${HDFS_ENABLED}" == "True" ]; then
+  CLASSPATH=$(${HADOOP_HOME}/bin/hadoop classpath --glob) python train_image_classifier.py ${OPTS}
+else
+  python train_image_classifier.py ${OPTS}
+fi

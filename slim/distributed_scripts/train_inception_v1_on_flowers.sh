@@ -9,11 +9,17 @@
 # cd slim
 # ./distributed_scripts/train_inception_v1_on_flowers.sh
 
-# Where the training (fine-tuned) checkpoint and logs will be saved to.
-TRAIN_DIR=/tmp/flowers-models/inception_v1
-
-# Where the dataset is saved to.
-DATASET_DIR=/tmp/flowers
+HDFS_ENABLED=False
+if [ "${HDFS_ENABLED}" == "True" ]; then
+  # Where the training (fine-tuned) checkpoint and logs will be saved to.
+  TRAIN_DIR=hdfs://namenode:9000/flowers-models/inception_v1
+  DATASET_DIR=hdfs://namenode:9000/datasets/cifar10
+else
+  # Where the training (fine-tuned) checkpoint and logs will be saved to.
+  TRAIN_DIR=/tmp/flowers-models/inception_v1
+  # Where the dataset is saved to.
+  DATASET_DIR=/tmp/flowers
+fi
 
 MAX_STEPS=3000
 
@@ -40,6 +46,11 @@ if [ -e "${ENV_PATH}" ]; then
   source ${ENV_PATH}
 fi
 
+# Re-check the hdfs flag
+if [ "${HDFS_ENABLED}" == "True" ]; then
+  source ./distributed_scripts/hadoop_env.sh
+fi
+
 if [ ! "${JOB_NAME}" == "ps" ] && [ ! "${JOB_NAME}" == "worker" ]; then
   echo "ERROR: Invalid job name: ${JOB_NAME}"
   echo $USAGE
@@ -63,10 +74,12 @@ OPTS="--type=distributed \
 if [ "${JOB_NAME}" == "ps" ]; then # PS
   OPTS+=" --ps_on_cpu=${PS_ON_CPU}"
 else # Worker
-  # Download the dataset
-  python download_and_convert_data.py \
-    --dataset_name=flowers \
-    --dataset_dir=${DATASET_DIR}
+  if [ ! "${HDFS_ENABLED}" == "True" ]; then
+    # Download the dataset
+    python download_and_convert_data.py \
+      --dataset_name=flowers \
+      --dataset_dir=${DATASET_DIR}
+  fi
 
   OPTS+=" --dataset_name=flowers \
     --dataset_split_name=train \
@@ -83,5 +96,9 @@ else # Worker
     --max_number_of_steps=${MAX_STEPS} \
     --learning_rate=0.01"
 fi
-
-python train_image_classifier.py ${OPTS}
+# Run training.
+if [ "${HDFS_ENABLED}" == "True" ]; then
+  CLASSPATH=$(${HADOOP_HOME}/bin/hadoop classpath --glob) python train_image_classifier.py ${OPTS}
+else
+  python train_image_classifier.py ${OPTS}
+fi
