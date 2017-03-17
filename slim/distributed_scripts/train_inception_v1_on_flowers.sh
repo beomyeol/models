@@ -53,43 +53,35 @@ if ! [[ ${TASK_ID} =~ $re ]]; then
   exit
 fi
 
-# Download the dataset
-if [ "${JOB_NAME}" == "worker" ]; then
-  python download_and_convert_data.py \
-    --dataset_name=flowers \
-    --dataset_dir=${DATASET_DIR}
-fi
-
 OPTS="--type=distributed \
   --job_name=${JOB_NAME} \
   --ps_hosts=${PS_HOSTS} \
   --worker_hosts=${WORKER_HOSTS} \
   --task=${TASK_ID} \
-  --dataset_name=flowers \
-  --dataset_split_name=train \
-  --dataset_dir=${DATASET_DIR} \
-  --model_name=inception_v1 \
-  --batch_size=32 \
-  --save_interval_secs=${SAVE_SECS} \
-  --save_steps=${SAVE_STEPS} \
-  --save_summaries_secs=${SAVE_SUMMARIES_SECS} \
-  --log_every_n_steps=100 \
-  --optimizer=rmsprop \
-  --weight_decay=0.00004 \
-  --train_dir=${TRAIN_DIR} \
-  --max_number_of_steps=${MAX_STEPS} \
-  --learning_rate=0.01 \
-  --ps_on_cpu=${PS_ON_CPU}"
+  --train_dir=${TRAIN_DIR}"
+
+if [ "${JOB_NAME}" == "ps" ]; then # PS
+  OPTS+=" --ps_on_cpu=${PS_ON_CPU}"
+else # Worker
+  # Download the dataset
+  python download_and_convert_data.py \
+    --dataset_name=flowers \
+    --dataset_dir=${DATASET_DIR}
+
+  OPTS+=" --dataset_name=flowers \
+    --dataset_split_name=train \
+    --dataset_dir=${DATASET_DIR} \
+    --model_name=inception_v1 \
+    --batch_size=32 \
+    --save_interval_secs=${SAVE_SECS} \
+    --save_steps=${SAVE_STEPS} \
+    --save_summaries_secs=${SAVE_SUMMARIES_SECS} \
+    --log_every_n_steps=100 \
+    --optimizer=rmsprop \
+    --weight_decay=0.00004 \
+    --train_dir=${TRAIN_DIR} \
+    --max_number_of_steps=${MAX_STEPS} \
+    --learning_rate=0.01"
+fi
 
 python train_image_classifier.py ${OPTS}
-
-# Run evaluation.
-if [ "${JOB_NAME}" == "worker" ]; then
-  python eval_image_classifier.py \
-    --checkpoint_path=${TRAIN_DIR} \
-    --eval_dir=${TRAIN_DIR} \
-    --dataset_name=flowers \
-    --dataset_split_name=validation \
-    --dataset_dir=${DATASET_DIR} \
-    --model_name=inception_v1
-fi

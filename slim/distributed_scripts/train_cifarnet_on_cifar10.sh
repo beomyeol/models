@@ -53,47 +53,38 @@ if ! [[ ${TASK_ID} =~ $re ]]; then
   exit
 fi
 
-# Download the dataset
-if [ "${JOB_NAME}" == "worker" ]; then
-  python download_and_convert_data.py \
-    --dataset_name=cifar10 \
-    --dataset_dir=${DATASET_DIR}
-fi
-
 OPTS="--type=distributed \
   --job_name=${JOB_NAME} \
   --ps_hosts=${PS_HOSTS} \
   --worker_hosts=${WORKER_HOSTS} \
   --task=${TASK_ID} \
-  --train_dir=${TRAIN_DIR} \
-  --dataset_name=cifar10 \
-  --dataset_split_name=train \
-  --dataset_dir=${DATASET_DIR} \
-  --model_name=cifarnet \
-  --preprocessing_name=cifarnet \
-  --max_number_of_steps=${MAX_STEPS} \
-  --batch_size=128 \
-  --save_interval_secs=${SAVE_SECS} \
-  --save_steps=${SAVE_STEPS} \
-  --save_summaries_secs=${SAVE_SUMMARIES_SECS} \
-  --log_every_n_steps=100 \
-  --optimizer=sgd \
-  --learning_rate=0.1 \
-  --learning_rate_decay_factor=0.1 \
-  --num_epochs_per_decay=200 \
-  --weight_decay=0.004 \
-  --ps_on_cpu=${PS_ON_CPU}"
+  --train_dir=${TRAIN_DIR}"
+
+if [ "${JOB_NAME}" == "ps" ]; then # PS
+  OPTS+=" --ps_on_cpu=${PS_ON_CPU}"
+else # Worker
+  # Download the dataset
+  python download_and_convert_data.py \
+    --dataset_name=cifar10 \
+    --dataset_dir=${DATASET_DIR}
+
+  OPTS+=" --dataset_name=cifar10 \
+    --dataset_split_name=train \
+    --dataset_dir=${DATASET_DIR} \
+    --model_name=cifarnet \
+    --preprocessing_name=cifarnet \
+    --max_number_of_steps=${MAX_STEPS} \
+    --batch_size=128 \
+    --save_interval_secs=${SAVE_SECS} \
+    --save_steps=${SAVE_STEPS} \
+    --save_summaries_secs=${SAVE_SUMMARIES_SECS} \
+    --log_every_n_steps=100 \
+    --optimizer=sgd \
+    --learning_rate=0.1 \
+    --learning_rate_decay_factor=0.1 \
+    --num_epochs_per_decay=200 \
+    --weight_decay=0.004"
+fi
 
 # Run training.
 python train_image_classifier.py ${OPTS}
-
-# Run evaluation.
-if [ "${JOB_NAME}" == "worker" ]; then
-  python eval_image_classifier.py \
-    --checkpoint_path=${TRAIN_DIR} \
-    --eval_dir=${TRAIN_DIR} \
-    --dataset_name=cifar10 \
-    --dataset_split_name=test \
-    --dataset_dir=${DATASET_DIR} \
-    --model_name=cifarnet
-fi
