@@ -1,28 +1,28 @@
-#!/bin/bash
+  #!/bin/bash
 #
 # This script performs the following operations:
 # 1. Downloads the Flowers dataset
-# 2. Fine-tunes an InceptionV1 model on the Flowers training set.
+# 2. Fine-tunes an InceptionV3 model on the Flowers training set.
 # 3. Evaluates the model on the Flowers validation set.
 #
 # Usage:
 # cd slim
-# ./distributed_scripts/train_inception_v1_on_flowers.sh
+# ./slim/scripts/finetune_inceptionv3_on_flowers.sh
 
 HDFS_ENABLED=False
 if [ "${HDFS_ENABLED}" == "True" ]; then
   # Where the training (fine-tuned) checkpoint and logs will be saved to.
-  TRAIN_DIR=hdfs://namenode:9000/flowers-models/inception_v1
+  TRAIN_DIR=hdfs://namenode:9000/flowers-models/inception_v3
   DATASET_DIR=hdfs://namenode:9000/datasets/flowers
 else
   # Where the training (fine-tuned) checkpoint and logs will be saved to.
-  TRAIN_DIR=/tmp/flowers-models/inception_v1
+  TRAIN_DIR=/tmp/flowers-models/inception_v3
   # Where the dataset is saved to.
   DATASET_DIR=/tmp/flowers
 fi
 
 MAX_STEPS=3000
-LOG_STEPS=100
+LOG_STEPS=10
 
 # Checkpoint
 SAVE_SECS=0
@@ -85,18 +85,19 @@ else # Worker
   OPTS+=" --dataset_name=flowers \
     --dataset_split_name=train \
     --dataset_dir=${DATASET_DIR} \
-    --model_name=inception_v1 \
+    --model_name=inception_v3 \
+    --max_number_of_steps=${MAX_STEPS} \
     --batch_size=32 \
+    --learning_rate=0.001 \
+    --learning_rate_decay_type=fixed \
     --save_interval_secs=${SAVE_SECS} \
     --save_steps=${SAVE_STEPS} \
     --save_summaries_secs=${SAVE_SUMMARIES_SECS} \
     --log_every_n_steps=${LOG_STEPS} \
     --optimizer=rmsprop \
-    --weight_decay=0.00004 \
-    --train_dir=${TRAIN_DIR} \
-    --max_number_of_steps=${MAX_STEPS} \
-    --learning_rate=0.01"
+    --weight_decay=0.00004"
 fi
+
 # Run training.
 if [ "${HDFS_ENABLED}" == "True" ]; then
   CLASSPATH=$(${HADOOP_HOME}/bin/hadoop classpath --glob) python train_image_classifier.py ${OPTS}

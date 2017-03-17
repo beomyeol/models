@@ -23,6 +23,7 @@ else
 fi
 
 MAX_STEPS=100000
+LOG_STEPS=100
 
 # Checkpoint
 SAVE_SECS=120
@@ -92,7 +93,7 @@ else # Worker
     --save_interval_secs=${SAVE_SECS} \
     --save_steps=${SAVE_STEPS} \
     --save_summaries_secs=${SAVE_SUMMARIES_SECS} \
-    --log_every_n_steps=100 \
+    --log_every_n_steps=${LOG_STEPS} \
     --optimizer=sgd \
     --learning_rate=0.1 \
     --learning_rate_decay_factor=0.1 \
