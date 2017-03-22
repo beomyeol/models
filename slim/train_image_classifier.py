@@ -631,6 +631,13 @@ def train(master='', cluster_spec=None):
 def main(_):
   assert FLAGS.type in ['single', 'distributed'], 'type must be either "single" or "distributed"'
 
+  tf.logging.info('model_name: %s', FLAGS.model_name)
+  tf.logging.info('dataset_dir: %s', FLAGS.dataset_dir)
+  tf.logging.info('train_dir: %s', FLAGS.train_dir)
+  tf.logging.info('save_steps: %d', FLAGS.save_steps)
+  tf.logging.info('save_secs: %d', FLAGS.save_interval_secs)
+  tf.logging.info('job: %s/%d', FLAGS.job_name, FLAGS.task)
+
   if FLAGS.type == 'single':
     train()
   else:
