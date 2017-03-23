@@ -75,8 +75,12 @@ OPTS="--type=distributed \
 if [ "${JOB_NAME}" == "ps" ]; then # PS
   OPTS+=" --ps_on_cpu=${PS_ON_CPU}"
 else # Worker
-  if [ ! "${HDFS_ENABLED}" == "True" ]; then
-    # Download the dataset
+  # Download the dataset
+  if [ "${HDFS_ENABLED}" == "True" ]; then
+    CLASSPATH=$(${HADOOP_HOME}/bin/hadoop classpath --glob) python download_and_convert_data.py \
+      --dataset_name=flowers \
+      --dataset_dir=${DATASET_DIR}
+  else
     python download_and_convert_data.py \
       --dataset_name=flowers \
       --dataset_dir=${DATASET_DIR}
