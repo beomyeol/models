@@ -64,12 +64,13 @@ def EmbeddingLookupFeatures(params, sparse_features, allow_weights):
     params = [params]
   # Lookup embeddings.
   sparse_features = tf.convert_to_tensor(sparse_features)
-  indices, ids, weights = gen_parser_ops.unpack_sparse_features(sparse_features)
+  indices, ids, weights = gen_parser_ops.unpack_syntax_net_sparse_features(
+      sparse_features)
   embeddings = tf.nn.embedding_lookup(params, ids)
 
   if allow_weights:
     # Multiply by weights, reshaping to allow broadcast.
-    broadcast_weights_shape = tf.concat(axis=0, values=[tf.shape(weights), [1]])
+    broadcast_weights_shape = tf.concat([tf.shape(weights), [1]], 0)
     embeddings *= tf.reshape(weights, broadcast_weights_shape)
 
   # Sum embeddings by index.
@@ -330,7 +331,7 @@ class GreedyParser(object):
                                            i,
                                            return_average=return_average))
 
-    last_layer = tf.concat(axis=1, values=embeddings)
+    last_layer = tf.concat(embeddings, 1)
     last_layer_size = self.embedding_size
 
     # Create ReLU layers.
@@ -477,11 +478,15 @@ class GreedyParser(object):
     """Embeddings at the given index will be set to pretrained values."""
 
     def _Initializer(shape, dtype=tf.float32, partition_info=None):
+      """Variable initializer that loads pretrained embeddings."""
       unused_dtype = dtype
+      seed1, seed2 = tf.get_seed(self._seed)
       t = gen_parser_ops.word_embedding_initializer(
           vectors=embeddings_path,
           task_context=task_context,
-          embedding_init=self._embedding_init)
+          embedding_init=self._embedding_init,
+          seed=seed1,
+          seed2=seed2)
 
       t.set_shape(shape)
       return t
