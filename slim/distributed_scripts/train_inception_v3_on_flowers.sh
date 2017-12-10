@@ -49,7 +49,7 @@ fi
 
 # Re-check the hdfs flag
 if [ "${HDFS_ENABLED}" == "True" ]; then
-  source ./distributed_scripts/hadoop_env.sh
+  source ./hadoop_env.sh
 fi
 
 if [ ! "${JOB_NAME}" == "ps" ] && [ ! "${JOB_NAME}" == "worker" ]; then
